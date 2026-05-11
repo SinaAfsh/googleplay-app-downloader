@@ -1,4 +1,4 @@
-name: App-Downloader2_Manual APK Download from Google Play
+name: Manual APK Download from Google Play
 
 on:
   workflow_dispatch:
@@ -28,42 +28,67 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install google-play-scraper
         run: |
-          pip install google-play-scraper
+          pip install google-play-scraper requests
 
       - name: Download APK from Google Play
-        id: download
+        env:
+          PACKAGE_NAME: ${{ github.event.inputs.package_name }}
+          TARGET_FOLDER: ${{ github.event.inputs.target_folder }}
         run: |
-          from google_play_scraper import app
-          import requests
           import os
-          
-          PACKAGE_INPUT = "${{ github.event.inputs.package_name }}"
-          FOLDER = "${{ github.event.inputs.target_folder }}"
+          import re
+          import requests
+          from google_play_scraper import app
           
           # Extract package name from URL if needed
-          if "play.google.com" in PACKAGE_INPUT:
-              PACKAGE_NAME = PACKAGE_INPUT.split('id=')[-1].split('&')[0]
+          package_input = os.environ['PACKAGE_NAME']
+          if 'play.google.com' in package_input:
+              match = re.search(r'id=([a-zA-Z0-9_.]+)', package_input)
+              if match:
+                  package_name = match.group(1)
+              else:
+                  raise Exception("Could not extract package name from URL")
           else:
-              PACKAGE_NAME = PACKAGE_INPUT
+              package_name = package_input
           
-          os.makedirs(FOLDER, exist_ok=True)
+          # Create target folder
+          folder = os.environ['TARGET_FOLDER']
+          os.makedirs(folder, exist_ok=True)
           
-          # Get app info and download URL
-          app_info = app(packageName=PACKAGE_NAME, lang='en', country='us')
+          print(f"Downloading: {package_name}")
+          
+          # Get app info from Google Play
+          app_info = app(
+              packageName=package_name,
+              lang='en',
+              country='us'
+          )
+          
+          # Get download URL from app info
           download_url = app_info['offer'][0]['url']
+          print(f"Download URL obtained")
           
-          # Download APK
+          # Download the APK
+          output_path = os.path.join(folder, f"{package_name}.apk")
           response = requests.get(download_url, stream=True)
-          output_path = os.path.join(FOLDER, f"{PACKAGE_NAME}.apk")
+          response.raise_for_status()
+          
+          total_size = int(response.headers.get('content-length', 0))
+          downloaded = 0
           
           with open(output_path, 'wb') as f:
               for chunk in response.iter_content(chunk_size=8192):
                   f.write(chunk)
+                  downloaded += len(chunk)
+                  if total_size:
+                      percent = (downloaded / total_size) * 100
+                      print(f"\rProgress: {percent:.1f}%", end='')
           
-          print(f"Downloaded to: {output_path}")
-          print(f"::set-output name=downloaded_folder::{FOLDER}")
+          print(f"\n✅ Downloaded to: {output_path}")
+          print(f"File size: {os.path.getsize(output_path)} bytes")
+          
         shell: python
 
       - name: Commit and Push APK
@@ -76,4 +101,5 @@ jobs:
           else
             git commit -m "Add APK for ${{ github.event.inputs.package_name }} [skip ci]"
             git push
+            echo "✅ APK successfully pushed to repository"
           fi
