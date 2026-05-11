@@ -1,0 +1,79 @@
+name: App-Downloader2_Manual APK Download from Google Play
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: 'Package Name (e.g., com.whatsapp) or Play Store URL'
+        required: true
+        type: string
+      target_folder:
+        description: 'Target folder in repository'
+        required: false
+        default: 'downloaded-apks'
+        type: string
+
+jobs:
+  download-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install google-play-scraper
+
+      - name: Download APK from Google Play
+        id: download
+        run: |
+          from google_play_scraper import app
+          import requests
+          import os
+          
+          PACKAGE_INPUT = "${{ github.event.inputs.package_name }}"
+          FOLDER = "${{ github.event.inputs.target_folder }}"
+          
+          # Extract package name from URL if needed
+          if "play.google.com" in PACKAGE_INPUT:
+              PACKAGE_NAME = PACKAGE_INPUT.split('id=')[-1].split('&')[0]
+          else:
+              PACKAGE_NAME = PACKAGE_INPUT
+          
+          os.makedirs(FOLDER, exist_ok=True)
+          
+          # Get app info and download URL
+          app_info = app(packageName=PACKAGE_NAME, lang='en', country='us')
+          download_url = app_info['offer'][0]['url']
+          
+          # Download APK
+          response = requests.get(download_url, stream=True)
+          output_path = os.path.join(FOLDER, f"{PACKAGE_NAME}.apk")
+          
+          with open(output_path, 'wb') as f:
+              for chunk in response.iter_content(chunk_size=8192):
+                  f.write(chunk)
+          
+          print(f"Downloaded to: {output_path}")
+          print(f"::set-output name=downloaded_folder::{FOLDER}")
+        shell: python
+
+      - name: Commit and Push APK
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Add APK for ${{ github.event.inputs.package_name }} [skip ci]"
+            git push
+          fi
