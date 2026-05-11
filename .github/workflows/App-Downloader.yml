@@ -1,0 +1,73 @@
+name: Manual APK Download from Google Play
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: 'Package Name (e.g., com.whatsapp) or Play Store URL'
+        required: true
+        type: string
+      target_folder:
+        description: 'Target folder in repository'
+        required: false
+        default: 'downloaded-apks'
+        type: string
+
+jobs:
+  download-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # برای Push فایل دانلود شده به ریپازیتوری
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install gplaydl
+        run: |
+          pip install gplaydl
+          # دریافت توکن احراز هویت ناشناس (Anonymous)
+          gplaydl auth
+
+      - name: Download APK from Google Play
+        id: download
+        run: |
+          PACKAGE_INPUT="${{ github.event.inputs.package_name }}"
+          
+          # استخراج Package Name از لینک اگر کاربر لینک داده باشد
+          if [[ "$PACKAGE_INPUT" == *"play.google.com"* ]]; then
+            PACKAGE_NAME=$(echo "$PACKAGE_INPUT" | grep -oP '(?<=id=)[a-zA-Z0-9_.]+')
+            echo "Extracted package name: $PACKAGE_NAME"
+          else
+            PACKAGE_NAME="$PACKAGE_INPUT"
+          fi
+          
+          FOLDER="${{ github.event.inputs.target_folder }}"
+          mkdir -p "$FOLDER"
+          
+          # دانلود APK در پوشه مشخص شده
+          gplaydl download "$PACKAGE_NAME" -o "$FOLDER"
+          
+          echo "Download completed. Files in $FOLDER:"
+          ls -la "$FOLDER"
+          
+          # تنظیم خروجی برای مرحله commit
+          echo "downloaded_folder=$FOLDER" >> $GITHUB_OUTPUT
+
+      - name: Commit and Push APK
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Add APK for ${{ github.event.inputs.package_name }} [skip ci]"
+            git push
+            echo "APK successfully pushed to repository"
+          fi
